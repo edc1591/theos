@@ -20,6 +20,20 @@ export THEOS_PROJECT_DIR
 
 export PATH := $(THEOS_BIN_PATH):$(PATH)
 
+ifeq ($(THEOS_SCHEMA),)
+_THEOS_SCHEMA := $(shell echo "$(or $(schema),$(SCHEMA))" | tr 'a-z' 'A-Z')
+_THEOS_ON_SCHEMA := DEFAULT $(filter-out -%,$(_THEOS_SCHEMA))
+_THEOS_OFF_SCHEMA := $(patsubst -%,%,$(filter -%,$(_THEOS_SCHEMA)))
+THEOS_SCHEMA := $(strip $(filter-out $(_THEOS_OFF_SCHEMA),$(_THEOS_ON_SCHEMA)))
+_THEOS_CLEANED_SCHEMA_SET := $(shell echo "$(THEOS_SCHEMA)" | tr -Cd ' A-Z' | tr ' A-Z' '_a-z')
+export THEOS_SCHEMA _THEOS_CLEANED_SCHEMA_SET
+endif
+
+__schema_all_var_names = $(foreach sch,$(THEOS_SCHEMA),$(1)$(subst DEFAULT_,,$(sch)_$(2)))
+__schema_defined_var_names = $(foreach tuple,$(filter-out undefined:%,$(foreach schvar,$(call __schema_all_var_names,$(1),$(2)),$(origin $(schvar)):$(schvar))),$(lastword $(subst :, ,$(tuple))))
+__schema_var_all = $(strip $(foreach sch,$(call __schema_all_var_names,$(1),$(2)),$($(sch))))
+__schema_var_last = $(strip $($(lastword $(call __schema_defined_var_names,$(1),$(2)))))
+
 # There are some packaging-related variables set here because some of the target install rules rely on them.
 ifeq ($(_THEOS_TOP_INVOCATION_DONE),)
 _THEOS_HAS_STAGING_LAYOUT := $(shell [ -d "$(THEOS_PROJECT_DIR)/layout" ] && echo 1 || echo 0)
@@ -46,7 +60,7 @@ _THEOS_PLATFORM = $(uname_s)
 $(eval $(call __mod,platform/$(uname_s)-$(uname_p).mk))
 $(eval $(call __mod,platform/$(uname_s).mk))
 
-_THEOS_TARGET := $(or $(target),$(TARGET),$(_THEOS_PLATFORM_DEFAULT_TARGET))
+_THEOS_TARGET := $(or $(target),$(call __schema_var_last,,TARGET),$(_THEOS_PLATFORM_DEFAULT_TARGET))
 ifeq ($(_THEOS_TARGET),)
 $(error You did not specify a target, and the "$(THEOS_PLATFORM_NAME)" platform does not define a default target)
 endif
@@ -79,10 +93,9 @@ INTERNAL_LDFLAGS = $(if $(_THEOS_TARGET_HAS_LIBRARY_PATH),-L$(THEOS_TARGET_LIBRA
 
 OPTFLAG ?= -O2
 DEBUGFLAG ?= -ggdb
+DEBUG_CFLAGS = -DDEBUG $(DEBUGFLAG) -O0
+DEBUG_LDFLAGS = $(DEBUGFLAG) -O0
 ifeq ($(DEBUG),1)
-DEBUG_CFLAGS = -DDEBUG $(DEBUGFLAG)
-DEBUG_LDFLAGS = $(DEBUGFLAG)
-OPTFLAG := $(filter-out -O%, $(OPTFLAG))
 TARGET_STRIP = :
 PACKAGE_BUILDNAME ?= debug
 endif
@@ -95,7 +108,6 @@ INTERNAL_CFLAGS += $(SHARED_CFLAGS)
 
 THEOS_BUILD_DIR ?= .
 
-# If we're not using the default target, put the output in a folder named after the target.
 ifneq ($(THEOS_TARGET_NAME),$(_THEOS_PLATFORM_DEFAULT_TARGET))
 	THEOS_OBJ_DIR_NAME ?= obj/$(THEOS_TARGET_NAME)
 else
